@@ -1,0 +1,65 @@
+{
+    "unusedString": "
+        #include "/lib/settings.glsl"
+        #include "/lib/res_params.glsl"
+    ",
+    "version": 1,
+    "opaqueDrawBuffers": [1, 8],
+    "excludeLodsFromVanillaDepth": true,
+    "translucentDrawBuffers": [16, 7, 11, 14],
+    #ifdef TAA
+    "taaOffset": "{
+        const vec2[4] offsets = vec2[4](
+            vec2(-0.125, -0.875),
+            vec2( 0.875, -0.125),
+            vec2( 0.125,  0.875),
+            vec2(-0.875,  0.125)
+        );
+        return offsets[frameCounter % 4] * texelSize;
+    }",
+    #endif
+    #ifdef TAA_UPSCALING
+    "renderScale": [SCALE_FACTOR, SCALE_FACTOR],
+    #endif
+    "blending": {-1:"SRC_ALPHA ONE_MINUS_SRC_ALPHA ONE_MINUS_DST_ALPHA ONE", 2:"off"},
+    "useViewportDims": true,
+    "uniforms": [
+        "viewWidth",
+        "viewHeight",
+        "nightVision",
+        "noPuddleAreas",
+        "dhVoxyRenderDistance",
+        "dhVoxyFarPlane",
+        "dhVoxyNearPlane",
+        "vxModelView",
+        "vxModelViewPrev",
+        "vxModelViewInv",
+        "vxProj",
+        "vxProjInv",
+        "vxProjPrev",
+        "gbufferPreviousModelView",
+        "gbufferPreviousProjection",
+        "cameraPosition",
+        "previousCameraPosition",
+        "frameCounter",
+        "frameTimeCounter",
+        "texelSize",
+        "sunPosition",
+        "sunElevation",
+        "rainStrength",
+        "wetness",
+        "isEyeInWater"
+    ],
+    "samplers": [
+        "vxDepthTexOpaque",
+        "noisetex",
+        "rainNoiseTex",
+        "blissRainRippleTex1",
+        "blissRainRippleTex2",
+        "blissRainRippleTex3",
+        "colortex4",
+        "colortex5",
+        "depthtex0",
+        "depthtex1"
+    ]
+}
