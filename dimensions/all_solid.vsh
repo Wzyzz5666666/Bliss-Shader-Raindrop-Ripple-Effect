@@ -325,6 +325,10 @@ void main() {
 
 	#endif
 
+	// Keep end portals out of weather puddles/ripples in the deferred pass.
+	// 0.85 is unused by the material masks decoded in composite1.fsh.
+	if (PORTAL > 0) normalMat.a = 0.85;
+
 
 	#ifdef WAVY_PLANTS
 		bool istopv = gl_MultiTexCoord0.t < mc_midTexCoord.t;

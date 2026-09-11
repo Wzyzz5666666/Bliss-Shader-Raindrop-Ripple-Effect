@@ -107,17 +107,11 @@ float linearizeDepthFast(const in float depth, const in float near, const in flo
 }
 
 vec4 BilateralUpscale(sampler2D tex, sampler2D depth, vec2 coord, float referenceDepth){
-	ivec2 scaling = ivec2(1.0/VL_RENDER_RESOLUTION);
-	ivec2 posDepth  = ivec2(coord*VL_RENDER_RESOLUTION) * scaling;
-	ivec2 posColor  = ivec2(coord*VL_RENDER_RESOLUTION);
- 	ivec2 pos = ivec2(gl_FragCoord.xy*texelSize + 1);
-
-	ivec2 getRadius[4] = ivec2[](
-   	ivec2(-2,-2),
-	 	ivec2(-2, 0),
-		ivec2( 0, 0),
-		ivec2( 0,-2)
-  );
+	// Match composite2's sample at floor(fragCoord)/resolution + 0.5.
+	vec2 lowPosition = (coord - 0.5) * VL_RENDER_RESOLUTION;
+	ivec2 maxColor = max(ivec2(RENDER_SCALE * VL_RENDER_RESOLUTION / texelSize), ivec2(1)) - 1;
+	ivec2 maxDepth = max(ivec2(RENDER_SCALE / texelSize), ivec2(1)) - 1;
+	ivec2 center = clamp(ivec2(floor(lowPosition + 0.5)), ivec2(0), maxColor);
 
 	#ifdef DISTANT_HORIZONS
 		float diffThreshold = 0.01;
@@ -129,24 +123,25 @@ vec4 BilateralUpscale(sampler2D tex, sampler2D depth, vec2 coord, float referenc
 	vec4 RESULT = vec4(0.0);
 	float SUM = 0.0;
 
-	for (int i = 0; i < 4; i++) {
-		
-		ivec2 radius = getRadius[i];
-
-		#ifdef DISTANT_HORIZONS
-			float offsetDepth = sqrt(texelFetch2D(depth, posDepth + radius * scaling + pos * scaling,0).a/65000.0);
-		#else
-			float offsetDepth = ld(texelFetch2D(depth, posDepth + radius * scaling + pos * scaling, 0).r);
-		#endif
-
-		float EDGES = abs(offsetDepth - referenceDepth) < diffThreshold ? 1.0 : 1e-5;
-		
-		RESULT += texelFetch2D(tex, posColor + radius + pos, 0) * EDGES;
-
-		SUM += EDGES;
+	for (int y = -1; y <= 1; ++y) {
+		for (int x = -1; x <= 1; ++x) {
+			ivec2 sampleColor = center + ivec2(x, y);
+			if (any(lessThan(sampleColor, ivec2(0))) || any(greaterThan(sampleColor, maxColor))) continue;
+			ivec2 sampleDepth = clamp(ivec2(vec2(sampleColor) / VL_RENDER_RESOLUTION), ivec2(0), maxDepth);
+			#ifdef DISTANT_HORIZONS
+				float offsetDepth = sqrt(texelFetch2D(depth, sampleDepth, 0).a/65000.0);
+			#else
+				float offsetDepth = ld(texelFetch2D(depth, sampleDepth, 0).r);
+			#endif
+			// Reject other surfaces completely, including leaves over open sky.
+			if (abs(offsetDepth - referenceDepth) >= diffThreshold) continue;
+			vec2 delta = vec2(sampleColor) - lowPosition;
+			float weight = exp2(-2.0 * dot(delta, delta));
+			RESULT += texelFetch2D(tex, sampleColor, 0) * weight;
+			SUM += weight;
+		}
 	}
-	// return vec4(1) * SUM;
-	return RESULT / SUM;
+	return SUM > 0.0 ? RESULT / SUM : texelFetch2D(tex, center, 0);
 
 }
 
@@ -405,14 +400,23 @@ void main() {
 ////// --------------- VARIOUS FOG EFFECTS (in front of volumetric fog)
 //////////// blindness, nightvision, liquid fogs and misc fogs
 
-////// --------------- bloomy rain effect
+  ////// --------------- bloomy rain effect
   #ifdef OVERWORLD_SHADER
-    float rainDrops = clamp(texture2D(colortex9, texcoord).a, 0.0, 1.0);
-    if (rainDrops > 0.0) {
-      float rainDropVisibility = clamp(1.0 - pow(rainDrops * 5.0, 2.0), 0.0, 1.0);
+    // Weather is rendered without depth testing, so consume the exact pixel
+    // written by gbuffers_weather instead of filtering the rain mask between
+    // neighboring pixels. This avoids Voxy/TAA turning dense drops into moire.
+    vec4 rainDrops = texelFetch2D(colortex9, ivec2(gl_FragCoord.xy), 0);
+    float rainDropAlpha = clamp(rainDrops.a, 0.0, 1.0);
+    float rainDropOpacity = clamp(RAIN_DROP_OPACITY, 0.0, 1.0);
+    float visibleRainAlpha = rainDropAlpha * rainDropOpacity;
+    if (visibleRainAlpha > 0.001) {
+      float rainDropVisibility = clamp(1.0 - pow(visibleRainAlpha * 5.0, 2.0), 0.0, 1.0);
       // Blend the final precipitation mask instead of scaling its source alpha.
       // This keeps the slider perceptually useful even for fully opaque drops.
-      bloomyFogMult *= mix(1.0, rainDropVisibility, RAIN_DROP_OPACITY);
+      bloomyFogMult *= mix(1.0, rainDropVisibility, rainDropOpacity);
+      // Match Eclipse's subtle particle-albedo contribution while keeping the
+      // existing Bliss slider as the single rain-visibility control.
+      color.rgb += rainDrops.rgb * visibleRainAlpha * 0.25;
     }
   #endif
   

@@ -127,7 +127,14 @@ void main() {
 
 
 	#ifdef WEATHER
-		gl_FragData[1].a = TEXTURE.a; // for bloomy rain and stuff
+		// Fade particles that intersect the camera. Without this guard the
+		// nearest rain quads cover most of the screen and turn the bloom mask
+		// into a high-frequency white veil, especially with Voxy depth active.
+		TEXTURE.a *= smoothstep(0.15, 1.5, length(feetPlayerPos));
+		// Keep the complete weather albedo available to the composite pass.
+		// Bliss previously stored alpha only, so rain could affect bloom but
+		// never contribute visible particle color.
+		gl_FragData[1] = TEXTURE; // weather color and alpha
 	#endif
 
 

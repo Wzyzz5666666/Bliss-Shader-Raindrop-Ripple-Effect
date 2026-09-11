@@ -61,8 +61,8 @@ vec4 toClipSpace3(vec3 viewSpacePosition) {
 
 void main() {
 	
-	lmtexcoord.xy = (gl_MultiTexCoord0).xy;
-	vec2 lmcoord = gl_MultiTexCoord1.xy / 255.0; // is this even correct? lol'
+	lmtexcoord.xy = (gl_TextureMatrix[0] * gl_MultiTexCoord0).xy;
+	vec2 lmcoord = gl_MultiTexCoord1.xy / 240.0;
 	lmtexcoord.zw = lmcoord;
 
 
@@ -75,14 +75,13 @@ void main() {
 
 	#ifdef WEATHER
 		vec3 position = mat3(gl_ModelViewMatrix) * vec3(gl_Vertex) + gl_ModelViewMatrix[3].xyz;
-
-   		vec3 worldpos = mat3(gbufferModelViewInverse) * position + gbufferModelViewInverse[3].xyz + cameraPosition;
-		bool istopv = worldpos.y > cameraPosition.y + 5.0 && lmtexcoord.w > 0.94;
+		vec3 worldpos = mat3(gbufferModelViewInverse) * position + gbufferModelViewInverse[3].xyz;
+		bool istopv = worldpos.y > 5.0 && lmtexcoord.w > 0.99;
 
 		if(!istopv){
-			worldpos.xyz -= cameraPosition;
-		}else{
-			worldpos.xyz -= cameraPosition + vec3(2.0,0.0,2.0);
+			// Keep the lower rain layer aligned to the camera as vanilla weather
+			// does, while leaving the top layer stable for sky-facing particles.
+			worldpos += vec3(2.0,0.0,2.0) * min(max(clamp(eyeBrightnessSmooth.y/240.0,0,1)-0.95,0)/0.05,1);
 		}
 
 		position = mat3(gbufferModelView) * worldpos + gbufferModelView[3].xyz;

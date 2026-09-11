@@ -10,7 +10,7 @@ const int colortex4Format = RGBA16F;				// light values and skyboxes (everything
 const int colortex6Format = R11F_G11F_B10F;			// additionnal buffer for bloom (composite3->final)
 const int colortex7Format = RGBA8;					// Final output, transparencies id (gbuffer->composite4)
 const int colortex8Format = RGBA8;					// Specular Texture
-const int colortex9Format = RGBA8;					// rain in alpha
+const int colortex9Format = RGBA16;					// weather particle color and alpha
 const int colortex10Format = RGBA16;				// resourcepack Skies
 const int colortex11Format = RGBA16; 				// unchanged translucents albedo, alpha and tangent normals
 const int colortex12Format = RGBA16F;				// DISTANT HORIZONS + VANILLA MIXED DEPTHs
@@ -119,7 +119,7 @@ vec4 smoothfilter(in sampler2D tex, in vec2 uv)
 
 	uv = (uv - 0.5)/textureResolution;
 	
-	return texture2D( tex, uv);
+	return texture2D(tex, clamp(uv, texelSize * 0.5, RENDER_SCALE - texelSize * 0.5));
 }
 //approximation from SMAA presentation from siggraph 2016
 vec3 FastCatmulRom(sampler2D colorTex, vec2 texcoord, vec4 rtMetrics, float sharpenAmount)
@@ -137,11 +137,11 @@ vec3 FastCatmulRom(sampler2D colorTex, vec2 texcoord, vec4 rtMetrics, float shar
     vec2 w3 =         c  * f3 -                c * f2;
 
     vec2 w12 = w1 + w2;
-    vec2 tc12 = rtMetrics.xy * (centerPosition + w2 / w12);
+    vec2 tc12 = clamp(rtMetrics.xy * (centerPosition + w2 / w12), rtMetrics.xy * 0.5, 1.0 - rtMetrics.xy * 0.5);
     vec3 centerColor = texture2D(colorTex, vec2(tc12.x, tc12.y)).rgb;
 
-    vec2 tc0 = rtMetrics.xy * (centerPosition - 1.0);
-    vec2 tc3 = rtMetrics.xy * (centerPosition + 2.0);
+    vec2 tc0 = clamp(rtMetrics.xy * (centerPosition - 1.0), rtMetrics.xy * 0.5, 1.0 - rtMetrics.xy * 0.5);
+    vec2 tc3 = clamp(rtMetrics.xy * (centerPosition + 2.0), rtMetrics.xy * 0.5, 1.0 - rtMetrics.xy * 0.5);
     vec4 color = vec4(texture2D(colorTex, vec2(tc12.x, tc0.y )).rgb, 1.0) * (w12.x * w0.y ) +
                    vec4(texture2D(colorTex, vec2(tc0.x,  tc12.y)).rgb, 1.0) * (w0.x  * w12.y) +
                    vec4(centerColor,                                      1.0) * (w12.x * w12.y) +
@@ -179,20 +179,18 @@ vec3 invTonemap(vec3 col){
 
 vec3 closestToCamera5taps(vec2 texcoord, sampler2D depth)
 {
-	vec2 du = vec2(texelSize.x*2., 0.0);
-	vec2 dv = vec2(0.0, texelSize.y*2.);
-
-	vec3 dtl = vec3(texcoord,0.) + vec3(-texelSize, texture2D(depth, texcoord - dv - du).x);
-	vec3 dtr = vec3(texcoord,0.) +  vec3( texelSize.x, -texelSize.y, texture2D(depth, texcoord - dv + du).x);
-	vec3 dmc = vec3(texcoord,0.) + vec3( 0.0, 0.0, texture2D(depth, texcoord).x);
-	vec3 dbl = vec3(texcoord,0.) + vec3(-texelSize.x, texelSize.y, texture2D(depth, texcoord + dv - du).x);
-	vec3 dbr = vec3(texcoord,0.) + vec3( texelSize.x, texelSize.y, texture2D(depth, texcoord + dv + du).x);
-
-	vec3 dmin = dmc;
-	dmin = dmin.z > dtr.z? dtr : dmin;
-	dmin = dmin.z > dtl.z? dtl : dmin;
-	dmin = dmin.z > dbl.z? dbl : dmin;
-	dmin = dmin.z > dbr.z? dbr : dmin;
+	vec2 center = clamp(texcoord, texelSize * 0.5, RENDER_SCALE - texelSize * 0.5);
+	vec3 dmin = vec3(center, texture2D(depth, center).x);
+	// Open sky must retain its own motion, not inherit nearby leaf/branch depth.
+	if (dmin.z < 1.0) {
+		for (int y = -1; y <= 1; y += 2) {
+			for (int x = -1; x <= 1; x += 2) {
+				vec2 uv = clamp(center + vec2(x, y) * texelSize, texelSize * 0.5, RENDER_SCALE - texelSize * 0.5);
+				float z = texture2D(depth, uv).x;
+				if (z < dmin.z) dmin = vec3(uv, z);
+			}
+		}
+	}
 	
 	#ifdef TAA_UPSCALING
 		dmin.xy = dmin.xy/RENDER_SCALE;
@@ -205,32 +203,8 @@ vec3 closestToCamera5taps(vec2 texcoord, sampler2D depth)
 
 vec3 closestToCamera5taps_DH(vec2 texcoord, sampler2D depth, sampler2D dhDepth, bool depthCheck)
 {
-	vec2 du = vec2(texelSize.x*2., 0.0);
-	vec2 dv = vec2(0.0, texelSize.y*2.);
-
-	vec3 dtl = vec3(texcoord,0.);
-	vec3 dtr = vec3(texcoord,0.);
-	vec3 dmc = vec3(texcoord,0.);
-	vec3 dbl = vec3(texcoord,0.);
-	vec3 dbr = vec3(texcoord,0.);
-
-	dtl += vec3(-texelSize, 					depthCheck ? texture2D(dhDepth, texcoord - dv - du).x	:	texture2D(depth, texcoord - dv - du).x);
-	dtr += vec3( texelSize.x, -texelSize.y, 	depthCheck ? texture2D(dhDepth, texcoord - dv + du).x	:	texture2D(depth, texcoord - dv + du).x);
-	dmc += vec3( 0.0, 0.0, 				   		depthCheck ? texture2D(dhDepth, texcoord).x				:	texture2D(depth, texcoord).x);
-	dbl += vec3(-texelSize.x, texelSize.y, 		depthCheck ? texture2D(dhDepth, texcoord + dv - du).x	:	texture2D(depth, texcoord + dv - du).x);
-	dbr += vec3( texelSize.x, texelSize.y, 		depthCheck ? texture2D(dhDepth, texcoord + dv + du).x	:	texture2D(depth, texcoord + dv + du).x);
-
-	vec3 dmin = dmc;
-	dmin = dmin.z > dtr.z? dtr : dmin;
-	dmin = dmin.z > dtl.z? dtl : dmin;
-	dmin = dmin.z > dbl.z? dbl : dmin;
-	dmin = dmin.z > dbr.z? dbr : dmin;
-	
-	#ifdef TAA_UPSCALING
-		dmin.xy = dmin.xy/RENDER_SCALE;
-	#endif
-
-	return dmin;
+	if (depthCheck) return closestToCamera5taps(texcoord, dhDepth);
+	return closestToCamera5taps(texcoord, depth);
 }
 
 
@@ -304,6 +278,10 @@ const vec2[8] offsets = vec2[8](vec2(1./8.,-3./8.),
 
 
 
+vec3 sampleCurrentTAA(vec2 uv) {
+	return texture2D(colortex3, clamp(uv, texelSize * 0.5, RENDER_SCALE - texelSize * 0.5)).rgb;
+}
+
 vec4 TAA_hq(){
 
 	#ifdef TAA_UPSCALING
@@ -334,9 +312,12 @@ vec4 TAA_hq(){
 		vec3 viewPos = toScreenSpace(closestToCamera);
 	#endif
 	
-	viewPos = mat3(gbufferModelViewInverse) * viewPos + gbufferModelViewInverse[3].xyz + (cameraPosition - previousCameraPosition);
+	bool skyPixel = closestToCamera.z >= 1.0;
+	viewPos = mat3(gbufferModelViewInverse) * viewPos;
+	if (!skyPixel) viewPos += gbufferModelViewInverse[3].xyz + (cameraPosition - previousCameraPosition);
 	
-	vec3 previousPosition = mat3(gbufferPreviousModelView) * viewPos + gbufferPreviousModelView[3].xyz;
+	vec3 previousPosition = mat3(gbufferPreviousModelView) * viewPos;
+	if (!skyPixel) previousPosition += gbufferPreviousModelView[3].xyz;
 	previousPosition = toClipSpace3Prev_DH(previousPosition, depthCheck);
 	
 	vec2 velocity = previousPosition.xy - closestToCamera.xy;
@@ -353,15 +334,15 @@ vec4 TAA_hq(){
 		vec3 cMax = texture2D(colortex0, adjTC).rgb;
 		vec3 cMin = texture2D(colortex6, adjTC).rgb;
 	#else
-		vec3 albedoCurrent0 = texture2D(colortex3, adjTC).rgb;
-		vec3 albedoCurrent1 = texture2D(colortex3, adjTC + vec2(texelSize.x,texelSize.y)).rgb;
-		vec3 albedoCurrent2 = texture2D(colortex3, adjTC + vec2(texelSize.x,-texelSize.y)).rgb;
-		vec3 albedoCurrent3 = texture2D(colortex3, adjTC + vec2(-texelSize.x,-texelSize.y)).rgb;
-		vec3 albedoCurrent4 = texture2D(colortex3, adjTC + vec2(-texelSize.x,texelSize.y)).rgb;
-		vec3 albedoCurrent5 = texture2D(colortex3, adjTC + vec2(0.0,texelSize.y)).rgb;
-		vec3 albedoCurrent6 = texture2D(colortex3, adjTC + vec2(0.0,-texelSize.y)).rgb;
-		vec3 albedoCurrent7 = texture2D(colortex3, adjTC + vec2(-texelSize.x,0.0)).rgb;
-		vec3 albedoCurrent8 = texture2D(colortex3, adjTC + vec2(texelSize.x,0.0)).rgb;
+		vec3 albedoCurrent0 = sampleCurrentTAA(adjTC);
+		vec3 albedoCurrent1 = sampleCurrentTAA(adjTC + vec2(texelSize.x,texelSize.y));
+		vec3 albedoCurrent2 = sampleCurrentTAA(adjTC + vec2(texelSize.x,-texelSize.y));
+		vec3 albedoCurrent3 = sampleCurrentTAA(adjTC + vec2(-texelSize.x,-texelSize.y));
+		vec3 albedoCurrent4 = sampleCurrentTAA(adjTC + vec2(-texelSize.x,texelSize.y));
+		vec3 albedoCurrent5 = sampleCurrentTAA(adjTC + vec2(0.0,texelSize.y));
+		vec3 albedoCurrent6 = sampleCurrentTAA(adjTC + vec2(0.0,-texelSize.y));
+		vec3 albedoCurrent7 = sampleCurrentTAA(adjTC + vec2(-texelSize.x,0.0));
+		vec3 albedoCurrent8 = sampleCurrentTAA(adjTC + vec2(texelSize.x,0.0));
 		//Assuming the history color is a blend of the 3x3 neighborhood, we clamp the history to the min and max of each channel in the 3x3 neighborhood
 		vec3 cMax = max(max(max(albedoCurrent0,albedoCurrent1),albedoCurrent2),max(albedoCurrent3,max(albedoCurrent4,max(albedoCurrent5,max(albedoCurrent6,max(albedoCurrent7,albedoCurrent8))))));
 		vec3 cMin = min(min(min(albedoCurrent0,albedoCurrent1),albedoCurrent2),min(albedoCurrent3,min(albedoCurrent4,min(albedoCurrent5,min(albedoCurrent6,min(albedoCurrent7,albedoCurrent8))))));
@@ -373,7 +354,7 @@ vec4 TAA_hq(){
 		vec3 finalcAcc = clamp(albedoPrev, cMin, cMax);
 
 		//Increases blending factor when far from AABB and in motion, reduces ghosting
-		float isclamped = distance(albedoPrev,finalcAcc)/luma(albedoPrev) * 0.5;
+		float isclamped = distance(albedoPrev,finalcAcc)/max(luma(albedoPrev), 1e-6) * 0.5;
 		float movementRejection = (0.12+isclamped)*clamp(length(velocity/texelSize),0.0,1.0);
 
 		//Blend current pixel with clamped history, apply fast tonemap beforehand to reduce flickering

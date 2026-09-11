@@ -87,6 +87,7 @@ uniform vec3 nsunColor;
 #include "/lib/Shadow_Params.glsl"
 #include "/lib/color_transforms.glsl"
 #include "/lib/projections.glsl"
+#include "/lib/reflection_history.glsl"
 #include "/lib/sky_gradient.glsl"
 #include "/lib/waterBump.glsl"
 
@@ -243,12 +244,10 @@ vec3 rayTrace(vec3 dir, vec3 position,float dither, float fresnel, bool inwater)
     vec3 clipPosition = toClipSpace3(position);
 	float rayLength = ((position.z + dir.z * far*sqrt(3.)) > -near) ?
        (-near -position.z) / dir.z : far*sqrt(3.);
-    vec3 direction = normalize(toClipSpace3(position+dir*rayLength)-clipPosition);  //convert to clip space
-    direction.xy = normalize(direction.xy);
+    vec3 direction = toClipSpace3(position+dir*rayLength)-clipPosition;
 
     //get at which length the ray intersects with the edge of the screen
-    vec3 maxLengths = (step(0.,direction)-clipPosition) / direction;
-    float mult = min(min(maxLengths.x,maxLengths.y),maxLengths.z);
+    float mult = BlissReflectionRayLimit(clipPosition, direction);
 
 
     vec3 stepv = direction * mult / quality * vec3(RENDER_SCALE,1.0);
@@ -258,10 +257,15 @@ vec3 rayTrace(vec3 dir, vec3 position,float dither, float fresnel, bool inwater)
 	float minZ = clipPosition.z;
 	float maxZ = spos.z+stepv.z*0.5;
 	
-	spos.xy += offsets[framemod8]*texelSize*0.5/RENDER_SCALE;
+	vec2 jitterOffset = vec2(0.0);
+	#ifdef TAA
+		jitterOffset = offsets[framemod8]*texelSize*0.5;
+	#endif
+	spos.xy += jitterOffset;
 
 	float dist = 1.0 + clamp(position.z*position.z/50.0,0,2); // shrink sample size as distance increases
     for (int i = 0; i <= int(quality); i++) {
+		if (any(lessThanEqual(spos.xy, vec2(0.0))) || any(greaterThanEqual(spos.xy, RENDER_SCALE)) || spos.z <= 0.0 || spos.z >= 1.0) break;
 
 		// decode depth buffer
 		// float sp = sqrt(texelFetch2D(colortex4,ivec2(spos.xy/texelSize/4),0).w/65000.0);
@@ -273,7 +277,7 @@ vec3 rayTrace(vec3 dir, vec3 position,float dither, float fresnel, bool inwater)
 		float sp = sqrt((texelFetch2D(colortex4,ivec2(testthing),0).a)/65000.0);
 		sp = invLinZ(sp);
 
-        if(sp <= max(maxZ,minZ) && sp >= min(maxZ,minZ)) return vec3(spos.xy/RENDER_SCALE,sp);
+        if(sp <= max(maxZ,minZ) && sp >= min(maxZ,minZ)) return vec3((spos.xy-jitterOffset)/RENDER_SCALE,sp);
 
 
         spos += stepv;
@@ -419,14 +423,24 @@ if (gl_FragCoord.x * texelSize.x < 1.0  && gl_FragCoord.y * texelSize.y < 1.0 )	
 			if (waterRippleWet > 0.001) {
 				float rippleProfile = BlissPuddleNoise(feetPlayerPos + cameraPosition);
 				vec3 rippleNormal = BlissRainRippleNormal(feetPlayerPos + cameraPosition, rippleProfile, blissRainRippleTex1, blissRainRippleTex2, blissRainRippleTex3, 0.5);
-				float rippleInfluence = rippleProfile * waterRippleWet * saturate(viewToWorld(normal).y * 0.5 + 0.5);
+				// The underside of an exposed water surface receives the same ripples.
+				float rippleInfluence = rippleProfile * waterRippleWet * saturate(abs(viewToWorld(normal).y) * 0.5 + 0.5);
+				vec3 baseTangentNormal = normalize(tbnMatrix * normal);
 				normal = BlissApplyRippleTangentNormal(normal, tbnMatrix, rippleNormal, rippleInfluence);
 				// Rain ripples should read primarily through the wet specular lobe.
 				// Keeping only a small part in diffuse lighting avoids black rings
 				// when the view is aimed at the ground away from the sun highlight.
 				diffuseNormal = normalize(mix(diffuseNormal, normal, RIPPLE_DIFFUSE_STRENGTH));
-				vec3 rippleTangentNormal = tbnMatrix * normal;
-				TangentNormal = (rippleTangentNormal.xy / 3.0) * 0.5 + 0.5;
+				// tbnMatrix stores the tangent axes as rows, so this converts the
+				// combined view-space normal back to tangent space for refraction.
+				vec3 rippleTangentNormal = normalize(tbnMatrix * normal);
+				TangentNormal = rippleTangentNormal.xy / 6.0 + 0.5;
+				if (isEyeInWater == 1) {
+					// Boost only the rain-induced change for the underside. Keep the
+					// existing base waves and above-water refraction unchanged.
+					vec2 rainRefractionDelta = (rippleTangentNormal.xy - baseTangentNormal.xy) / 6.0;
+					TangentNormal = clamp(TangentNormal + rainRefractionDelta, 0.0, 1.0);
+				}
 			}
 		}
 	#endif
@@ -666,11 +680,9 @@ if (gl_FragCoord.x * texelSize.x < 1.0  && gl_FragCoord.y * texelSize.y < 1.0 )	
 					if (rtPos.z < 1.){
 						vec3 previousPosition = mat3(gbufferModelViewInverse) * toScreenSpace(rtPos) + gbufferModelViewInverse[3].xyz + cameraPosition-previousCameraPosition;
 						previousPosition = mat3(gbufferPreviousModelView) * previousPosition + gbufferPreviousModelView[3].xyz;
-						previousPosition.xy = projMAD(gbufferPreviousProjection, previousPosition).xy / -previousPosition.z * 0.5 + 0.5;
-						if (previousPosition.x > 0.0 && previousPosition.y > 0.0 && previousPosition.x < 1.0 && previousPosition.x < 1.0) {
-							Reflections.a = 1.0;
-							Reflections.rgb = texture2D(colortex5,previousPosition.xy).rgb ;
-						}
+						vec4 history = BlissReflectionHistory(previousPosition, 0.0);
+						Reflections.a = history.a;
+						Reflections.rgb = history.rgb;
 					}
 				}
 			#endif

@@ -839,6 +839,7 @@ void main() {
 		bool isGrass = abs(dataUnpacked1.w-0.60) < 0.01;
 		bool hand = abs(dataUnpacked1.w-0.75) < 0.01 && z0 < 1.0;
 		bool isBeacon = abs(dataUnpacked1.w-0.80) < 0.01 && z0 < 1.0;
+		bool isPortal = abs(dataUnpacked1.w-0.85) < 0.01;
 		// bool blocklights = abs(dataUnpacked1.w-0.8) <0.01;
 
 
@@ -994,7 +995,7 @@ void main() {
 		float puddleWet = 0.0;
 		vec3 diffuseNormal = slopednormal;
 		#if defined OVERWORLD_SHADER && defined Puddles
-			if (!iswater && !entities && !isLeaf && !hand && !isBeacon && !isGrass) {
+			if (!iswater && !isPortal && !entities && !isLeaf && !hand && !isBeacon && !isGrass) {
 				vec3 puddleWorldPosition = feetPlayerPos + cameraPosition;
 				vec3 puddleWorldNormal = normalize(viewToWorld(FlatNormals));
 				float puddleSkyExposure = BlissRainSkyExposure(lightmap.y);
@@ -1344,7 +1345,7 @@ void main() {
 		gl_FragData[0].rgb = (Indirect_lighting + Direct_lighting) * albedo;
 
 		#if defined OVERWORLD_SHADER && defined Puddles
-			if (!iswater && !entities && !isLeaf && !hand && !isBeacon && !isGrass) {
+			if (!iswater && !isPortal && !entities && !isLeaf && !hand && !isBeacon && !isGrass) {
 				if (puddleWet > 0.001) {
 					vec2 puddleNoises = vec2(noise, R2_dither());
 					DoPuddleSpecularReflections(gl_FragData[0].rgb, viewPos, feetPlayerPos_normalized, puddleNoises, normal, WsunVec, DirectLightColor * Shadows, albedo, SpecularTex.r, SpecularTex.g, puddleWet);

@@ -343,9 +343,10 @@ void main() {
 
 	float rainfall = max(wetness, rainStrength) * noPuddleAreas;
 	float Puddle_shape = 0.;
+	bool isPortal = PORTAL > 0;
 	
 	#if defined Puddles && defined WORLD && !defined ENTITIES && !defined HAND
-		Puddle_shape = BlissPuddleMask(worldpos, skyExposure, rainfall, viewToWorld(normal).y);
+		if (!isPortal) Puddle_shape = BlissPuddleMask(worldpos, skyExposure, rainfall, viewToWorld(normal).y);
 	#endif
 
 	
@@ -497,7 +498,7 @@ void main() {
 	#if defined WORLD && defined Puddles && defined RAIN_SPLASH_EFFECT && !defined ENTITIES && !defined HAND
 		vec3 groundWorldNormal = normalize(viewToWorld(normal));
 		float groundRippleWet = Puddle_shape * clamp(groundWorldNormal.y, 0.0, 1.0);
-		if (groundRippleWet > 0.001) {
+		if (!isPortal && groundRippleWet > 0.001) {
 			float rippleProfile = BlissPuddleNoise(worldpos);
 			vec3 rippleNormal = BlissRainRippleNormal(worldpos, rippleProfile, blissRainRippleTex1, blissRainRippleTex2, blissRainRippleTex3, 1.0);
 			groundRippleWet = rippleProfile * skyExposure * rainfall * saturate(groundWorldNormal.y * 0.5 + 0.5) * clamp(groundWorldNormal.y, 0.0, 1.0);
