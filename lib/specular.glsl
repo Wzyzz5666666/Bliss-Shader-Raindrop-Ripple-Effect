@@ -1,5 +1,7 @@
 uniform int framemod8;
 
+#include "/lib/reflection_history.glsl"
+
 const vec2[8] offsets = vec2[8](vec2(1./8.,-3./8.),
 									vec2(-1.,3.)/8.,
 									vec2(5.0,1.)/8.,
@@ -66,12 +68,10 @@ vec3 rayTraceSpeculars(vec3 dir, vec3 position, float dither, float quality, boo
 	vec3 clipPosition = toClipSpace3(position);
 	float rayLength = ((position.z + dir.z * far*sqrt(3.)) > -near) ?
 	                   (-near -position.z) / dir.z : far*sqrt(3.);
-	vec3 direction = normalize(toClipSpace3(position+dir*rayLength)-clipPosition);  //convert to clip space
-	direction.xy = normalize(direction.xy);
+	vec3 direction = toClipSpace3(position+dir*rayLength)-clipPosition;
 
 	//get at which length the ray intersects with the edge of the screen
-	vec3 maxLengths = (step(0.0,direction)-clipPosition) / direction;
-	float mult = min(min(maxLengths.x,maxLengths.y),maxLengths.z);
+	float mult = BlissReflectionRayLimit(clipPosition, direction);
 
 	vec3 stepv = direction * mult / quality*vec3(RENDER_SCALE,1.0);
 
@@ -80,11 +80,13 @@ vec3 rayTraceSpeculars(vec3 dir, vec3 position, float dither, float quality, boo
 	float minZ = spos.z;
 	float maxZ = spos.z;
 	
-	spos.xy += TAA_Offset*texelSize*0.5/RENDER_SCALE;
+	vec2 jitterOffset = TAA_Offset*texelSize*0.5;
+	spos.xy += jitterOffset;
 	float depthcancleoffset = pow(1.0-(quality/reflection_quality),1.0);
 
 	float dist = 1.0 + clamp(position.z*position.z/50.0,0.0,2.0); // shrink sample size as distance increases
   	for (int i = 0; i <= int(quality); i++) {
+		if (any(lessThanEqual(spos.xy, vec2(0.0))) || any(greaterThanEqual(spos.xy, RENDER_SCALE)) || spos.z <= 0.0 || spos.z >= 1.0) break;
 
 		vec2 scaleUV = hand ? spos.xy*texelSize : spos.xy/texelSize/4.0; // fix for ssr on hand
 		float sp = sqrt(texelFetch2D(colortex4,ivec2(scaleUV),0).a/65000.0);
@@ -92,7 +94,7 @@ vec3 rayTraceSpeculars(vec3 dir, vec3 position, float dither, float quality, boo
 
 		sp = invLinZ(sp);
 
-		if(sp <= max(maxZ,minZ) && sp >= min(maxZ,minZ) ) return vec3(spos.xy/RENDER_SCALE,sp);
+		if(sp <= max(maxZ,minZ) && sp >= min(maxZ,minZ) ) return vec3((spos.xy-jitterOffset)/RENDER_SCALE,sp);
 		spos += stepv;
 		
 		//small bias
@@ -108,25 +110,21 @@ vec3 rayTraceSpeculars(vec3 dir, vec3 position, float dither, float quality, boo
   return vec3(1.1);
 }
 
-vec3 rayTracePuddleSpeculars(vec3 dir, vec3 position, float dither, inout float reflectLength, out float hitConfidence){
+vec3 rayTracePuddleSpeculars(vec3 dir, vec3 position, float dither, inout float reflectLength){
 	const float puddleTraceQuality = 64.0;
 	vec3 clipPosition = toClipSpace3(position);
 	float maximumDistance = far * sqrt(3.0);
 	float rayLength = ((position.z + dir.z * maximumDistance) > -near)
 		? (-near - position.z) / dir.z
 		: maximumDistance;
-	vec3 direction = normalize(toClipSpace3(position + dir * rayLength) - clipPosition);
-	float projectedLength = length(direction.xy);
-	hitConfidence = 0.0;
-	if (projectedLength < 1e-6) return vec3(1.1);
-	direction.xy /= projectedLength;
+	vec3 direction = toClipSpace3(position + dir * rayLength) - clipPosition;
+	if (dot(direction, direction) < 1e-12) return vec3(1.1);
 
-	vec3 maxLengths = (step(0.0, direction) - clipPosition) / direction;
-	float maximumLength = min(min(maxLengths.x, maxLengths.y), maxLengths.z);
+	float maximumLength = BlissReflectionRayLimit(clipPosition, direction);
 	if (maximumLength <= 0.0) return vec3(1.1);
 
 	vec3 stepVector = direction * maximumLength / puddleTraceQuality * vec3(RENDER_SCALE, 1.0);
-	vec2 jitterOffset = TAA_Offset * texelSize * 0.5 / RENDER_SCALE;
+	vec2 jitterOffset = TAA_Offset * texelSize * 0.5;
 	vec3 screenPosition = clipPosition * vec3(RENDER_SCALE, 1.0) + stepVector * (1.0 + dither);
 	screenPosition.xy += jitterOffset;
 
@@ -137,13 +135,11 @@ vec3 rayTracePuddleSpeculars(vec3 dir, vec3 position, float dither, inout float 
 	for (int stepIndex = 0; stepIndex < 64; stepIndex++) {
 		if (screenPosition.x <= 0.0 || screenPosition.y <= 0.0 || screenPosition.x >= RENDER_SCALE.x || screenPosition.y >= RENDER_SCALE.y || screenPosition.z <= 0.0 || screenPosition.z >= 1.0) break;
 
-		float sceneDepth = texture2D(depthtex1, screenPosition.xy).x;
+		float sceneDepth = texelFetch2D(depthtex1, ivec2(screenPosition.xy / texelSize), 0).x;
 		float lowerDepth = min(minimumDepth, maximumDepth);
 		float upperDepth = max(minimumDepth, maximumDepth);
 		if (stepIndex > 1 && sceneDepth < 1.0 && sceneDepth >= lowerDepth && sceneDepth <= upperDepth) {
 			vec2 hitUV = (screenPosition.xy - jitterOffset) / RENDER_SCALE;
-			float edgeDistance = min(min(hitUV.x, 1.0 - hitUV.x), min(hitUV.y, 1.0 - hitUV.y));
-			hitConfidence = smoothstep(0.0, 0.025, edgeDistance);
 			return vec3(hitUV, sceneDepth);
 		}
 
@@ -214,6 +210,34 @@ float GGX(vec3 n, vec3 v, vec3 l, float r, float f0) {
   return dotNL * D * F / (dotLH*dotLH*(1.0-k2)+k2);
 }
 
+// Puddle highlights use perceptual roughness, as in iterationT's deferred
+// lighting: alpha = roughness^2 and the GGX distribution uses alpha^2.
+// Keep this separate from Bliss' material and water highlight conventions.
+float BlissPuddleHighlight(vec3 N, vec3 V, vec3 L, float roughness, float f0) {
+    float NoL = clamp(dot(N, L), 0.0, 1.0);
+    float NoV = clamp(dot(N, V), 0.0, 1.0);
+    vec3 halfway = V + L;
+    if (NoL <= 0.0 || NoV <= 0.0 || dot(halfway, halfway) < 1e-8) return 0.0;
+    halfway = normalize(halfway);
+    float NoH = clamp(dot(N, halfway), 0.0, 1.0);
+    float LoH = clamp(dot(L, halfway), 0.0, 1.0);
+    float alpha = max(roughness * roughness, 0.0016);
+    float alphaSquared = alpha * alpha;
+    // Use sin^2 from the cross product to avoid cancellation near the peak.
+    vec3 halfPerpendicular = cross(N, halfway);
+    float denominator = dot(halfPerpendicular, halfPerpendicular) + NoH * NoH * alphaSquared;
+    float distribution = alphaSquared / (3.141592653589793 * denominator * denominator);
+    float k = alpha * 0.5;
+    float visibility = (NoV / (NoV * (1.0 - k) + k))
+                     * (NoL / (NoL * (1.0 - k) + k));
+    float fresnel = f0 + (1.0 - f0) * pow(1.0 - LoH, 5.0);
+    // Let the material's continuous wet smoothness shape the highlight.
+    float smoothnessWeight = clamp(pow(max(1.0 - roughness, 0.0), 0.7) * 2.0, 0.0, 1.0);
+    float highlight = NoL * distribution * fresnel * visibility * smoothnessWeight;
+    // Preserve the existing brightness ceiling without a flat clipped top.
+    return highlight / (1.0 + highlight / 1.25);
+}
+
 void DoPuddleSpecularReflections(
 	inout vec3 Output,
 	vec3 FragPos,
@@ -229,11 +253,10 @@ void DoPuddleSpecularReflections(
 ){
 	vec3 N = normalize(Normal);
 	float wetnessAmount = clamp(Wetness, 0.0, 1.0);
+	if (wetnessAmount <= 0.0) return;
 	float wetSmoothness = clamp(MaterialSmoothness, 0.0, 1.0);
 	float roughness = max(1.0 - wetSmoothness, 0.0001);
-	// Keep the same roughness convention as interactionT's deferred GGX
-	// path.  Squaring here and then raising it again inside GGX produces an
-	// ultra-sharp (1 - smoothness)^5 lobe and makes SSR/ripple rings turn black.
+	// The dedicated puddle highlight below handles perceptual roughness.
 	float specularity = max(wetSmoothness * wetSmoothness * wetSmoothness * 1.15 - 0.15, 0.0);
 	float materialF0 = clamp(MaterialF0, 0.0, 1.0);
 	float metallic = materialF0 > 229.5 / 255.0 ? pow(materialF0, 2.2) : 0.0;
@@ -245,34 +268,24 @@ void DoPuddleSpecularReflections(
 	float reflectionAmount = mix(fresnel * specularity, 1.0, metallic);
 	vec3 metalTint = metallic > 0.0 ? normalize(Albedo + 1e-7) * (dot(Albedo, vec3(0.21, 0.72, 0.07)) * 0.7 + 0.3) : vec3(1.0);
 
-	vec3 environment = skyCloudsFromTexLOD(reflectionDirection, colortex4, sqrt(roughness) * 9.0).rgb / 30.0 * metalTint;
-	vec3 reflectedScene = environment;
-
+	vec3 environment = skyCloudsFromTexLOD(reflectionDirection, colortex4, roughness * 9.0).rgb / 30.0 * metalTint;
 	float reflectionLength = 0.0;
-	float hitConfidence = 0.0;
-	vec3 rayPosition = rayTracePuddleSpeculars(mat3(gbufferModelView) * reflectionDirection, FragPos, Noise.y, reflectionLength, hitConfidence);
+	vec3 rayPosition = rayTracePuddleSpeculars(mat3(gbufferModelView) * reflectionDirection, FragPos, Noise.y, reflectionLength);
+	// An SSR miss is missing screen data, not evidence that the sky is occluded.
+	vec3 reflectedScene = environment;
 	if (rayPosition.z < 1.0) {
 		vec3 previousPosition = mat3(gbufferModelViewInverse) * toScreenSpace(rayPosition) + gbufferModelViewInverse[3].xyz + cameraPosition - previousCameraPosition;
 		previousPosition = mat3(gbufferPreviousModelView) * previousPosition + gbufferPreviousModelView[3].xyz;
-		previousPosition.xy = projMAD(gbufferPreviousProjection, previousPosition).xy / -previousPosition.z * 0.5 + 0.5;
-		if (previousPosition.x > 0.0 && previousPosition.y > 0.0 && previousPosition.x < 1.0 && previousPosition.y < 1.0) {
-			float previousEdge = min(min(previousPosition.x, 1.0 - previousPosition.x), min(previousPosition.y, 1.0 - previousPosition.y));
-			// Rough wet surfaces need the same spatial filtering as their sky
-			// fallback; an unfiltered SSR sample turns the animated normal into
-			// isolated black rings when the camera looks almost straight down.
-			float reflectionLod = clamp(sqrt(roughness) * 9.0, 0.0, 8.0);
-			vec3 screenReflection = texture2DLod(colortex5, previousPosition.xy, reflectionLod).rgb * metalTint;
-			reflectedScene = mix(environment, screenReflection, hitConfidence * smoothstep(0.0, 0.025, previousEdge));
-		}
+		// iterationT samples detailed scene reflections. A small footprint keeps
+		// nearby bright sky from washing across the puddle's reflected detail.
+		float reflectionLod = roughness * roughness * 4.0;
+		vec4 history = BlissReflectionHistory(previousPosition, reflectionLod);
+		reflectedScene = mix(environment, history.rgb * metalTint, history.a);
 	}
 
 	vec3 finalReflection = mix(Output, reflectedScene, reflectionAmount);
-	float sunReflection = min(GGX(N, normalize(-WorldPos), LightPos, roughness, mix(dielectricF0, materialF0, metallic)), 1.25);
-	// interactionT lets the wet smoothness control the GGX lobe directly.  Do
-	// not attenuate the highlight a second time by wetness*0.35: that makes
-	// puddle ripples disappear exactly where the source shader shows them.
-	float wetSpecularWeight = smoothstep(0.02, 0.20, wetnessAmount);
-	finalReflection += DirectLight * sunReflection * wetSpecularWeight * Sun_specular_Strength * metalTint;
+	float sunReflection = BlissPuddleHighlight(N, -viewRay, LightPos, roughness, mix(dielectricF0, materialF0, metallic));
+	finalReflection += DirectLight * sunReflection * Sun_specular_Strength * metalTint;
 	Output = finalReflection;
 }
 
@@ -369,12 +382,9 @@ void DoSpecularReflections(
 			if (RaytracePos.z < 1.0){
 				vec3 previousPosition = mat3(gbufferModelViewInverse) * toScreenSpace(RaytracePos) + gbufferModelViewInverse[3].xyz + cameraPosition-previousCameraPosition;
 				previousPosition = mat3(gbufferPreviousModelView) * previousPosition + gbufferPreviousModelView[3].xyz;
-				previousPosition.xy = projMAD(gbufferPreviousProjection, previousPosition).xy / -previousPosition.z * 0.5 + 0.5;
-		
-				if (previousPosition.x > 0.0 && previousPosition.y > 0.0 && previousPosition.x < 1.0 && previousPosition.x < 1.0) {
-					SS_Reflections.a = 1.0;
-					SS_Reflections.rgb = texture2DLod(colortex5, previousPosition.xy, LOD).rgb * Metals;
-				}
+				vec4 history = BlissReflectionHistory(previousPosition, LOD);
+				SS_Reflections.a = history.a;
+				SS_Reflections.rgb = history.rgb * Metals;
 			}
 			// make sure it takes the fresnel into account for SSR.
 			SS_Reflections.rgb = lerp(Output, SS_Reflections.rgb, RayContribution);
