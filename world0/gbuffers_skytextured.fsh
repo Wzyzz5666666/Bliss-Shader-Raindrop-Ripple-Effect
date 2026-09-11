@@ -34,7 +34,16 @@ void main() {
 		if(renderStage == 4) COLOR.rgb *= 5.0;
 		// if(renderStage == 5) COLOR.rgb *= 1.5;
 
-		COLOR.rgb = max(COLOR.rgb * (0.9+0.1*interleaved_gradientNoise()), 0.0);
+		// The procedural sky uses this dither to hide banding, but applying it
+		// to the vanilla moon creates a visible pixel grid around the moon when
+		// it is composited together with procedural stars.
+		#ifdef VANILLA_MOON
+			if (renderStage != 5) {
+				COLOR.rgb = max(COLOR.rgb * (0.9+0.1*interleaved_gradientNoise()), 0.0);
+			}
+		#else
+			COLOR.rgb = max(COLOR.rgb * (0.9+0.1*interleaved_gradientNoise()), 0.0);
+		#endif
 		
 		gl_FragData[0] = vec4(COLOR.rgb/255.0, COLOR.a);
 	#else
