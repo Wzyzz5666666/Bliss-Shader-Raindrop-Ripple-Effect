@@ -23,6 +23,7 @@ uniform float sunElevation;
 
 // uniform float far;
 uniform float dhFarPlane;
+uniform float dhVoxyRenderDistance;
 uniform float dhNearPlane;
 
 uniform int frameCounter;

@@ -89,6 +89,7 @@ vec3 toScreenSpace(vec3 p) {
 }
 
 uniform float dhFarPlane;
+uniform float dhVoxyRenderDistance;
 uniform float dhNearPlane;
 
 #include "/lib/DistantHorizons_projections.glsl"
