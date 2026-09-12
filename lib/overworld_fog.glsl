@@ -100,10 +100,15 @@ vec4 GetVolumetricFog(
 	vec3 dVWorld = (wpos-gbufferModelViewInverse[3].xyz);
 
 	#ifdef DISTANT_HORIZONS
-		float maxLength = min(length(dVWorld), max(dhFarPlane-1000,0.0))/length(dVWorld);
+		// Voxy exposes dhFarPlane as a projection range (48000), while its
+		// actual loaded scene radius is vxRenderDistance (section radius * 32).
+		// Integrating to the projection range accumulates spatial/temporal noise
+		// through empty sky and makes the Voxy path flicker in low-res VL passes.
+		float voxyFogDistance = max(dhRenderDistance, far);
+		float maxLength = min(length(dVWorld), voxyFogDistance) / max(length(dVWorld), 1e-6);
 		SAMPLECOUNT += SAMPLECOUNT;
 	#else
-		float maxLength = min(length(dVWorld), far)/length(dVWorld);
+		float maxLength = min(length(dVWorld), far) / max(length(dVWorld), 1e-6);
 	#endif
 	
 	dV *= maxLength;
