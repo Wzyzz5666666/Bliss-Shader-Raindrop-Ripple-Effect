@@ -1,4 +1,4 @@
-#Sun Sep 13 13:28:07 CST 2026
+#Tue Sep 15 23:39:47 CST 2026
 BIOME_TINT_WATER=true
 BLISS_SHADERS=2
 BLOOMY_FOG=1.0
@@ -11,7 +11,7 @@ CloudLayer0_height=160
 CloudLayer1_density=0.15
 CloudLayer1_height=520
 CloudLayer2_density=0.5
-Cloud_Speed=3.0
+Cloud_Speed=1.5
 Dirt_Amount=0.08
 EMISSIVE_TYPE=2
 Exposure_Speed=5.0
