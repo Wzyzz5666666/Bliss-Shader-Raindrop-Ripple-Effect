@@ -1,6 +1,8 @@
 #ifndef BLISS_REFLECTION_HISTORY_GLSL
 #define BLISS_REFLECTION_HISTORY_GLSL
 
+uniform sampler2D colortex17;
+
 // Clip the projected segment without changing the ratio between XY and depth.
 float BlissReflectionRayLimit(vec3 origin, vec3 direction) {
     float limit = 1.0;
@@ -29,6 +31,19 @@ vec4 BlissReflectionHistory(vec3 previousViewPosition, float requestedLod) {
     float edgeLod = floor(log2(max(2.0 * edgeDistance, 1.0)));
     float lod = clamp(requestedLod, 0.0, edgeLod);
     return vec4(texture2DLod(colortex5, uv, lod).rgb, confidence);
+}
+
+vec4 BlissOpaqueReflectionHistory(vec3 previousViewPosition, float requestedLod) {
+    vec4 previousClip = gbufferPreviousProjection * vec4(previousViewPosition, 1.0);
+    if (previousClip.w <= 1e-5) return vec4(0.0);
+    vec2 uv = previousClip.xy / previousClip.w * 0.5 + 0.5;
+    vec2 edgePixels = min(uv, 1.0 - uv) / texelSize;
+    float edgeDistance = min(edgePixels.x, edgePixels.y);
+    float confidence = smoothstep(0.5, 2.5, edgeDistance);
+    if (confidence <= 0.0) return vec4(0.0);
+    float edgeLod = floor(log2(max(2.0 * edgeDistance, 1.0)));
+    float lod = clamp(requestedLod, 0.0, edgeLod);
+    return vec4(texture2DLod(colortex17, uv, lod).rgb, confidence);
 }
 
 #endif

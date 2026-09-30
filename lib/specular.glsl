@@ -279,7 +279,7 @@ void DoPuddleSpecularReflections(
 		// iterationT samples detailed scene reflections. A small footprint keeps
 		// nearby bright sky from washing across the puddle's reflected detail.
 		float reflectionLod = roughness * roughness * 4.0;
-		vec4 history = BlissReflectionHistory(previousPosition, reflectionLod);
+		vec4 history = BlissOpaqueReflectionHistory(previousPosition, reflectionLod);
 		reflectedScene = mix(environment, history.rgb * metalTint, history.a);
 	}
 
@@ -382,7 +382,7 @@ void DoSpecularReflections(
 			if (RaytracePos.z < 1.0){
 				vec3 previousPosition = mat3(gbufferModelViewInverse) * toScreenSpace(RaytracePos) + gbufferModelViewInverse[3].xyz + cameraPosition-previousCameraPosition;
 				previousPosition = mat3(gbufferPreviousModelView) * previousPosition + gbufferPreviousModelView[3].xyz;
-				vec4 history = BlissReflectionHistory(previousPosition, LOD);
+				vec4 history = BlissOpaqueReflectionHistory(previousPosition, LOD);
 				SS_Reflections.a = history.a;
 				SS_Reflections.rgb = history.rgb * Metals;
 			}
