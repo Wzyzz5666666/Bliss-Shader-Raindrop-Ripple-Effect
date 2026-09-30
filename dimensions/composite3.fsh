@@ -26,6 +26,7 @@ uniform sampler2D colortex11;
 uniform sampler2D colortex12;
 uniform sampler2D colortex13;
 uniform sampler2D colortex15;
+uniform sampler2D colortex18;
 uniform vec2 texelSize;
 
 #if defined NETHER_SHADER || defined END_SHADER
@@ -210,7 +211,7 @@ uniform float dhRenderDistance;
 uniform float eyeAltitude;
 
 void main() {
-  /* DRAWBUFFERS:73 */
+  /* RENDERTARGETS:7,3,17 */
 
 	////// --------------- SETUP STUFF --------------- //////
   vec2 texcoord = gl_FragCoord.xy*texelSize;
@@ -321,7 +322,11 @@ void main() {
     color.rgb = mix(color.rgb, borderFogColor, fog);
   #endif
 
+	bool particlePixel = texture2D(colortex18, texcoord).r > 0.5;
+	vec3 reflectionColor = color;
+
   if (TranslucentShader.a > 0.0){
+		vec3 colorBeforeTranslucents = color;
 		#ifdef Glass_Tint
       if(!iswater) color *= normalize(albedo.rgb+0.0001)*0.9+0.1;
     #endif
@@ -331,6 +336,14 @@ void main() {
     #ifdef BorderFog
       color.rgb = mix(color.rgb, borderFogColor, fog);
     #endif
+
+	// Keep particle color out of the history used by block reflections.
+	// Their current-frame color remains in `color` for the normal image.
+	if (particlePixel) {
+		reflectionColor = colorBeforeTranslucents;
+	} else {
+		reflectionColor = color;
+	}
   }
 
 ////// --------------- VARIOUS FOG EFFECTS (behind volumetric fog)
@@ -448,8 +461,11 @@ void main() {
   #endif
 // color.rgb = vec3(1) * sqrt(texture2D(colortex12,texcoord).a/65000.0);
 
+	if (!particlePixel) reflectionColor = color;
+
   gl_FragData[0].r = bloomyFogMult; // pass fog alpha so bloom can do bloomy fog
   gl_FragData[1].rgb = clamp(color.rgb, 0.0,68000.0);
+  gl_FragData[2] = vec4(clamp(reflectionColor, 0.0, 68000.0), 1.0);
 
   // gl_FragData[1].rgb = vec3(1) * sqrt(texelFetch2D(colortex12,ivec2(gl_FragCoord.xy),0).a/65000.0);
 

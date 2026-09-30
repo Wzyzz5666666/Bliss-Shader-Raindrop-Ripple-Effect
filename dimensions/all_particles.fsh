@@ -95,9 +95,10 @@ float phaseg(float x, float g){
 //////////////////////////////VOID MAIN//////////////////////////////
 //////////////////////////////VOID MAIN//////////////////////////////
 
-/* DRAWBUFFERS:29 */
+/* RENDERTARGETS:2,9,18 */
 
 void main() {
+	gl_FragData[2] = vec4(1.0, 0.0, 0.0, 1.0); // particle marker for reflection history
 	
 	#ifdef LINES
 		#ifndef SELECT_BOX

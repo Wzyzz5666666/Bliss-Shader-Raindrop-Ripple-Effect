@@ -18,6 +18,8 @@ const int colortex12Format = RGBA16F;				// DISTANT HORIZONS + VANILLA MIXED DEP
 const int colortex13Format = RGBA16F;				// low res VL (composite5->composite15)
 const int colortex14Format = RGBA8;					// rg = SSAO and SS-SSS. a = skylightmap for translucents.
 const int colortex15Format = RGBA8;					// flat normals and vanilla AO
+const int colortex17Format = RGBA16F;				// particle-free reflection history
+const int colortex18Format = RGBA8;				// current-frame particle marker
 #ifdef VOXY
 const int colortex16Format = RGBA16F; // voxy translucent stuff
 #endif
@@ -40,6 +42,8 @@ const bool colortex12Clear = false;
 const bool colortex13Clear = false;
 const bool colortex14Clear = true;
 const bool colortex15Clear = false;
+const bool colortex17Clear = false;
+const bool colortex18Clear = true;
 
 #ifdef VOXY
 const bool colortex16Clear = true;
