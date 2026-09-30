@@ -1,3 +1,3 @@
 The block rendering distance must not be lower than the shadow rendering distance, otherwise the latter is invalid.
 
-It's recommended to use 'Settings.txt' for the shader configuration file.
+It's recommended to use 'Settings.txt' for the shaderpack configuration file.
